@@ -26,6 +26,15 @@ _PROBE_INITIALIZE_BODY = (  # JSON-RPC ``initialize`` body for the content-type 
     '"capabilities":{},"clientInfo":{"name":"hermes-probe","version":"0.1"}}}')
 
 
+def _hermes_client_info():
+    """The ``clientInfo`` Hermes declares to every MCP server. Without it the SDK sends its own
+    default (``name="mcp"``), so servers that derive identity from the client name (audit actors,
+    per-client policy) attribute Hermes to a generic ``mcp`` client."""
+    import mcp.types as types  # late: keeps the SDK import lazy
+    from hermes_cli import __version__
+    return types.Implementation(name="hermes", version=__version__)
+
+
 def _content_type_base(resp) -> str:
     """``content-type`` header of *resp* without parameters, lowercased."""
     return resp.headers.get("content-type", "").split(";")[0].strip().lower()
@@ -129,8 +138,10 @@ class MCPServerTransportMixin:
         return caps is None or getattr(caps, "tools", None) is not None
 
     def _session_kwargs(self) -> dict:
-        """ClientSession kwargs: sampling, elicitation, notification + logging callbacks."""
+        """ClientSession kwargs: client identity, sampling, elicitation, notification + logging callbacks."""
         kwargs = {}
+        if _core._client_session_accepts("client_info"):
+            kwargs["client_info"] = _hermes_client_info()
         for handler in (self._sampling, self._elicitation):
             if handler:
                 kwargs.update(handler.session_kwargs())
@@ -198,7 +209,7 @@ class MCPServerTransportMixin:
         offered = _core.LATEST_HANDSHAKE_VERSION
         build_caps = getattr(session, "_build_capabilities", None)
         capabilities = build_caps(offered) if callable(build_caps) else types.ClientCapabilities()
-        client_info = getattr(session, "_client_info", None) or types.Implementation(name="hermes-agent", version="0")
+        client_info = getattr(session, "_client_info", None) or _hermes_client_info()
         result = await session.send_request(
             types.InitializeRequest(params=types.InitializeRequestParams(
                 protocolVersion=offered, capabilities=capabilities, clientInfo=client_info)),
